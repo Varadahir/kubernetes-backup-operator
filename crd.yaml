@@ -1,0 +1,71 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+
+metadata:
+  name: backuppolicies.backup.example.com
+
+spec:
+  group: backup.example.com
+
+  names:
+    kind: BackupPolicy
+    plural: backuppolicies
+    singular: backuppolicy
+    shortNames:
+      - bp
+
+  scope: Namespaced
+
+  versions:
+    - name: v1
+      served: true
+      storage: true
+
+      schema:
+        openAPIV3Schema:
+          type: object
+
+          properties:
+            spec:
+              type: object
+
+              properties:
+                target:
+                  type: object
+                  properties:
+                    database:
+                      type: string
+                  required:
+                    - database
+
+                credentialsSecret:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    key:
+                      type: string
+                  required:
+                    - name
+                    - key
+
+                schedule:
+                  type: string
+
+              required:
+                - target
+                - credentialsSecret
+                - schedule
+
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                message:
+                  type: string
+                lastBackup:
+                  type: string
+
+      subresources:
+        status: {}
