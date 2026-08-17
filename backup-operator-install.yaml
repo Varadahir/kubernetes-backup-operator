@@ -1,0 +1,313 @@
+# ============================================================
+# 1. BackupPolicy CRD
+# ============================================================
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: backuppolicies.backup.example.com
+spec:
+  group: backup.example.com
+  names:
+    kind: BackupPolicy
+    plural: backuppolicies
+    singular: backuppolicy
+    shortNames:
+      - bp
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                target:
+                  type: object
+                  properties:
+                    database:
+                      type: string
+                  required:
+                    - database
+
+                credentialsSecret:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    key:
+                      type: string
+                  required:
+                    - name
+                    - key
+
+                schedule:
+                  type: string
+
+              required:
+                - target
+                - credentialsSecret
+                - schedule
+
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                message:
+                  type: string
+                lastBackup:
+                  type: string
+
+      subresources:
+        status: {}
+
+---
+
+# ============================================================
+# 2. ServiceAccount
+# ============================================================
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backup-operator
+  namespace: default
+
+---
+
+# ============================================================
+# 3. ClusterRole
+# ============================================================
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-operator
+rules:
+
+  - apiGroups:
+      - backup.example.com
+    resources:
+      - backuppolicies
+      - backuppolicies/status
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+
+# ============================================================
+# 4. ClusterRoleBinding
+# ============================================================
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backup-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backup-operator
+subjects:
+  - kind: ServiceAccount
+    name: backup-operator
+    namespace: default
+
+---
+
+# ============================================================
+# 5. MinIO Secret
+# ============================================================
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+  namespace: default
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: admin
+  MINIO_ROOT_PASSWORD: minioadmin123
+
+---
+
+# ============================================================
+# 6. MinIO
+# ============================================================
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio
+  namespace: default
+  labels:
+    app: minio
+spec:
+  containers:
+    - name: minio
+      image: minio/minio:latest
+      args:
+        - server
+        - /data
+        - --console-address
+        - ":9001"
+
+      env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: MINIO_ROOT_USER
+
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: MINIO_ROOT_PASSWORD
+
+      ports:
+        - containerPort: 9000
+        - containerPort: 9001
+
+---
+
+# ============================================================
+# 7. MinIO Service
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: default
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+
+    - name: console
+      port: 9001
+      targetPort: 9001
+
+---
+
+# ============================================================
+# 8. Create MinIO backup bucket
+# ============================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-backup-bucket
+  namespace: default
+spec:
+  backoffLimit: 5
+
+  template:
+    spec:
+      restartPolicy: OnFailure
+
+      containers:
+        - name: create-bucket
+          image: minio/mc:latest
+
+          command:
+            - /bin/sh
+            - -c
+
+          args:
+            - |
+              echo "Waiting for MinIO..."
+
+              until mc alias set myminio http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                sleep 3
+              done
+
+              echo "Creating backups bucket..."
+
+              mc mb --ignore-existing myminio/backups
+
+              echo "Backup bucket ready."
+
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: MINIO_ROOT_USER
+
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: MINIO_ROOT_PASSWORD
+
+---
+
+# ============================================================
+# 9. Backup Operator
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-operator
+  namespace: default
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: backup-operator
+
+  template:
+    metadata:
+      labels:
+        app: backup-operator
+
+    spec:
+      serviceAccountName: backup-operator
+
+      containers:
+        - name: backup-operator
+
+          image: varadahir/backup-operator:v5
+
+          imagePullPolicy: Always

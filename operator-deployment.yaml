@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-operator
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backup-operator
+  template:
+    metadata:
+      labels:
+        app: backup-operator
+    spec:
+      serviceAccountName: backup-operator
+      containers:
+        - name: backup-operator
+          image: varadahir/backup-operator:v5
+          imagePullPolicy: IfNotPresent
