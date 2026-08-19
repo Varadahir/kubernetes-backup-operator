@@ -1,0 +1,15 @@
+apiVersion: backup.example.com/v1
+kind: BackupPolicy
+
+metadata:
+  name: company-backup
+
+spec:
+  target:
+    database: companydb
+
+  credentialsSecret:
+    name: company-db-secret
+    key: MYSQL_ROOT_PASSWORD
+
+  schedule: "*/2 * * * *"

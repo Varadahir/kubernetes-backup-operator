@@ -1,0 +1,15 @@
+apiVersion: backup.example.com/v1
+kind: BackupPolicy
+
+metadata:
+  name: friend-backup
+
+spec:
+  target:
+    database: frienddb
+
+  credentialsSecret:
+    name: friend-db-secret
+    key: MYSQL_ROOT_PASSWORD
+
+  schedule: "*/2 * * * *"
